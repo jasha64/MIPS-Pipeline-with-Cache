@@ -30,10 +30,12 @@ endmodule
 module imem(input  logic [5:0] a,
             output logic [31:0] rd);
 
-  logic [31:0] RAM[63:0];
+  logic [31:0] RAM[80:0];
 
-  initial
+  initial begin
       $readmemh("../Obj/memfile.dat",RAM);
+  end
+
 
   assign rd = RAM[a]; // word aligned
 endmodule
@@ -69,36 +71,41 @@ module controller(input  logic [5:0] op, funct,
                   output logic [2:0] alucontrol);
 
   logic [1:0] aluop;
-  logic       branch;
+  logic       branch; // Branch Enabled
+  logic       branchctrl; // Branch Control: beq or bne?
+  logic       branchcond; // Branch Condition Satisfied? (0 or 1)
 
-  maindec md(op, memtoreg, memwrite, branch,
+  maindec md(op, memtoreg, memwrite, branch, branchctrl,
              alusrc, regdst, regwrite, jump, aluop);
   aludec  ad(funct, aluop, alucontrol);
 
-  assign pcsrc = branch & zero;
+  mux2 #(1)  branchmux(zero, ~zero, branchctrl, branchcond);
+  assign pcsrc = branch & branchcond;
 endmodule
 
 module maindec(input  logic [5:0] op,
                output logic       memtoreg, memwrite,
-               output logic       branch, alusrc,
+               output logic       branch, branchctrl,
+               output logic       alusrc,
                output logic       regdst, regwrite,
                output logic       jump,
                output logic [1:0] aluop);
 
-  logic [8:0] controls;
+  logic [9:0] controls;
 
-  assign {regwrite, regdst, alusrc, branch, memwrite,
-          memtoreg, jump, aluop} = controls;
+  assign {regwrite, regdst, alusrc, branch, branchctrl,
+          memwrite, memtoreg, jump, aluop} = controls;
 
   always_comb
     case(op)
-      6'b000000: controls <= 9'b110000010; // RTYPE
-      6'b100011: controls <= 9'b101001000; // LW
-      6'b101011: controls <= 9'b001010000; // SW
-      6'b000100: controls <= 9'b000100001; // BEQ
-      6'b001000: controls <= 9'b101000000; // ADDI
-      6'b000010: controls <= 9'b000000100; // J
-      default:   controls <= 9'bxxxxxxxxx; // illegal op
+      6'b000000: controls <= 10'b1100000010; // RTYPE
+      6'b100011: controls <= 10'b1010001000; // LW
+      6'b101011: controls <= 10'b0010010000; // SW
+      6'b000100: controls <= 10'b0001000001; // BEQ
+      6'b000101: controls <= 10'b0001100001; // BNE
+      6'b001000: controls <= 10'b1010000000; // ADDI
+      6'b000010: controls <= 10'b0000000100; // J
+      default:   controls <= 10'bxxxxxxxxxx; // illegal op
     endcase
 endmodule
 
