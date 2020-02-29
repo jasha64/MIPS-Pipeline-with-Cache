@@ -25,7 +25,8 @@ module testbench();
       clk <= 1; # 5; clk <= 0; # 5;
     end
 
-  // check results
+  // check results manually
+  /*
   always @(negedge clk)
     begin
       if(memwrite) begin
@@ -38,4 +39,5 @@ module testbench();
         end
       end
     end
+  */
 endmodule
