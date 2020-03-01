@@ -7,11 +7,14 @@ module testbench();
   logic        clk;
   logic        reset;
 
-  logic [31:0] writedata, dataadr;
-  logic        memwrite;
-
   // instantiate device to be tested
-  mips_top dut(clk, reset, writedata, dataadr, memwrite);
+  logic [31:0] pc, instr, readdata, dataadr, writedata, result;
+  logic        memwrite;
+  
+  mips mips(clk, reset, pc, instr, memwrite, dataadr, 
+            writedata, result, readdata);
+  imem imem(pc[7:2], instr);
+  dmem dmem(clk, memwrite, dataadr, writedata, readdata);
   
   // initialize test
   initial

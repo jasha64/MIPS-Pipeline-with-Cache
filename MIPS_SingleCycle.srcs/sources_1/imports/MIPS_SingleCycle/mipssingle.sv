@@ -2,19 +2,6 @@
 // From Section 7.6 of Digital Design & Computer Architecture
 // Updated to SystemVerilog 26 July 2011 David_Harris@hmc.edu
 
-module mips_top(input  logic        clk, reset, 
-           output logic [31:0] writedata, dataadr, 
-           output logic        memwrite);
-
-  logic [31:0] pc, instr, readdata;
-  
-  // instantiate processor and memories
-  mips mips(clk, reset, pc, instr, memwrite, dataadr, 
-            writedata, readdata);
-  imem imem(pc[7:2], instr);
-  dmem dmem(clk, memwrite, dataadr, writedata, readdata);
-endmodule
-
 module dmem(input  logic        clk, we,
             input  logic [31:0] a, wd,
             output logic [31:0] rd);
@@ -44,7 +31,7 @@ module mips(input  logic        clk, reset,
             output logic [31:0] pc,
             input  logic [31:0] instr,
             output logic        memwrite,
-            output logic [31:0] aluout, writedata,
+            output logic [31:0] aluout, writedata, result,
             input  logic [31:0] readdata);
 
   logic       memtoreg, alusrc, aluext, regdst, 
@@ -59,7 +46,8 @@ module mips(input  logic        clk, reset,
               alusrc, aluext, regdst, regwrite, jump,
               alucontrol,
               zero, pc, instr,
-              aluout, writedata, readdata);
+              aluout, writedata, result,
+              readdata);
 endmodule
 
 module controller(input  logic [5:0] op, funct,
@@ -151,14 +139,13 @@ module datapath(input  logic        clk, reset,
                 output logic        zero,
                 output logic [31:0] pc,
                 input  logic [31:0] instr,
-                output logic [31:0] aluout, writedata,
+                output logic [31:0] aluout, writedata, result,
                 input  logic [31:0] readdata);
 
   logic [4:0]  writereg;
   logic [31:0] pcnext, pcnextbr, pcplus4, pcbranch;
   logic [31:0] zeroimm, signimm, extimm, signimmsh;
   logic [31:0] srca, srcb;
-  logic [31:0] result;
 
   // next PC logic
   flopr #(32) pcreg(clk, reset, pcnext, pc);
