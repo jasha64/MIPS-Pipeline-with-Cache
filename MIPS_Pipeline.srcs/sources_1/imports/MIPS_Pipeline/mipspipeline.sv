@@ -1,7 +1,3 @@
-// mips.sv
-// From Section 7.6 of Digital Design & Computer Architecture
-// Updated to SystemVerilog 26 July 2011 David_Harris@hmc.edu
-
 module dmem(input  logic        clk, we,
             input  logic [31:0] a, wd,
             output logic [31:0] rd);
@@ -36,15 +32,15 @@ module mips(input  logic        clk, reset,
 
   logic [31:0] instr_d;
   logic        memtoreg_w, alusrc_e, aluext_e, regdst_e, 
-               regwrite_w, jump, pcsrc_d, zero;
+               regwrite_m, regwrite_w, jump, pcsrc_d, zero;
   logic [2:0]  alucontrol_e;
 
   controller c(clk, reset, instr_d[31:26], instr_d[5:0], zero,
                memtoreg_w, memwrite_m, pcsrc_d,
-               alusrc_e, aluext_e, regdst_e, regwrite_w, jump,
+               alusrc_e, aluext_e, regdst_e, regwrite_m, regwrite_w, jump,
                alucontrol_e);
   datapath dp(clk, reset, memtoreg_w, pcsrc_d,
-              alusrc_e, aluext_e, regdst_e, regwrite_w, jump,
+              alusrc_e, aluext_e, regdst_e, regwrite_m, regwrite_w, jump,
               alucontrol_e,
               zero, pc_f, instr_f,
               aluout_m, writedata_m, result_w, instr_d,
@@ -56,7 +52,7 @@ module controller(input  logic       clk, reset,
                   input  logic       zero,
                   output logic       memtoreg_w, memwrite_m,
                   output logic       pcsrc_d, alusrc_e, aluext_e,
-                  output logic       regdst_e, regwrite_w,
+                  output logic       regdst_e, regwrite_m, regwrite_w,
                   output logic       jump,
                   output logic [2:0] alucontrol_e);
                   
@@ -163,7 +159,7 @@ endmodule
 module datapath(input  logic        clk, reset,
                 input  logic        memtoreg_w, pcsrc_d,
                 input  logic        alusrc_e, aluext_e, regdst_e,
-                input  logic        regwrite_w, jump,
+                input  logic        regwrite_m, regwrite_w, jump,
                 input  logic [2:0]  alucontrol_e,
                 output logic        zero,
                 output logic [31:0] pc_f,
@@ -176,7 +172,9 @@ module datapath(input  logic        clk, reset,
   logic [31:0] pc_f;
   logic [31:0] instr_f,   instr_d;
   logic [31:0] pcplus4_f, pcplus4_d;
-  logic [31:0]            srca_d,      srca_e;
+  logic [31:0]            rfread1_d,   rfread1_e;
+  logic [31:0]            rfread2_d,   rfread2_e;
+  logic [31:0]                         srca_e;
   logic [31:0]                         srcb_e;
   logic [4:0]             rs_d,        rs_e;
   logic [4:0]             rt_d,        rt_e;
@@ -185,9 +183,11 @@ module datapath(input  logic        clk, reset,
   logic [31:0]            signimm_d,   signimm_e;
   logic [31:0]            signimmsh_d;
   logic [31:0]                         extimm_e;
+  logic [1:0]                          forwarda_e;
+  logic [1:0]                          forwardb_e;
   logic [4:0]                          writereg_e,  writereg_m,  writereg_w;
   logic [31:0]                         aluout_e,    aluout_m,    aluout_w;
-  logic [31:0]            writedata_d, writedata_e, writedata_m;
+  logic [31:0]                         writedata_e, writedata_m;
   logic [31:0]                                                   result_w;
   logic [31:0]                                      readdata_m,  readdata_w;
     
@@ -205,23 +205,29 @@ module datapath(input  logic        clk, reset,
   assign rt_d = instr_d[20:16];
   assign rd_d = instr_d[15:11];
   regfile     rf(clk, reset, regwrite_w, rs_d, rt_d, 
-                 writereg_w, result_w, srca_d, writedata_d);
-  mux2 #(5)   wrmux_e(rt_d, rd_d, regdst_e, writereg_e);
+                 writereg_w, result_w, rfread1_d, rfread2_d);//srca_d, writedata_d);
+  mux2 #(5)   wrmux_e(rt_e, rd_e, regdst_e, writereg_e);
   mux2 #(32)  resmux_w(aluout_w, readdata_w, memtoreg_w, result_w);
   signext     se_d(instr_d[15:0], signimm_d);
   zeroext     ze_d(instr_d[15:0], zeroimm_d);
 
   // ALU logic
+  mux3 #(32)  fwamux_e(rfread1_e, result_w, aluout_m, forwarda_e, srca_e);
+  mux3 #(32)  fwbmux_e(rfread2_e, result_w, aluout_m, forwardb_e, writedata_e);
   mux2 #(32)  extmux_e(signimm_e, zeroimm_e, aluext_e, extimm_e);
   mux2 #(32)  srcbmux_e(writedata_e, extimm_e, alusrc_e, srcb_e);
   alu         alu(srca_e, srcb_e, alucontrol_e, aluout_e, zero);
+  
+  // hazard unit
+  hazardunit  hz(regwrite_m, regwrite_w, rs_e, rt_e, writereg_m, writereg_w,
+                 forwarda_e, forwardb_e);
   
   // pipeline registers
   flopr #(32) fetch2decode_11(clk, reset,     instr_f,     instr_d);
   flopr #(32) fetch2decode_12(clk, reset,     pcplus4_f,   pcplus4_d);
   
-  flopr #(32) decode2execute_11(clk, reset,   srca_d,      srca_e);
-  flopr #(32) decode2execute_12(clk, reset,   writedata_d, writedata_e);
+  flopr #(32) decode2execute_11(clk, reset,   rfread1_d,   rfread1_e);
+  flopr #(32) decode2execute_12(clk, reset,   rfread2_d,   rfread2_e);
   flopr #(5)  decode2execute_13(clk, reset,   rs_d,        rs_e);
   flopr #(5)  decode2execute_14(clk, reset,   rt_d,        rt_e);
   flopr #(5)  decode2execute_15(clk, reset,   rd_d,        rd_e);
@@ -262,6 +268,19 @@ module regfile(input  logic        clk, reset,
 
   assign rd1 = (ra1 != 0) ? rf[ra1] : 0;
   assign rd2 = (ra2 != 0) ? rf[ra2] : 0;
+endmodule
+
+module hazardunit(input  logic        regwrite_m, regwrite_w,
+                  input  logic [4:0]  rs_e, rt_e, writereg_m, writereg_w,
+                  output logic [1:0]  forwarda_e, forwardb_e);
+  always_comb
+    if (rs_e != '0 && rs_e == writereg_m && regwrite_m) forwarda_e = 2'b10;
+    else if (rs_e != '0 && rs_e == writereg_w && regwrite_w) forwarda_e = 2'b01;
+    else forwarda_e = 2'b00;
+  always_comb
+    if (rt_e != '0 && rt_e == writereg_m && regwrite_m) forwardb_e = 2'b10;
+    else if (rt_e != '0 && rt_e == writereg_w && regwrite_w) forwardb_e = 2'b01;
+    else forwardb_e = 2'b00;
 endmodule
 
 module adder(input  logic [31:0] a, b,
@@ -305,6 +324,18 @@ module mux2 #(parameter WIDTH = 8)
               output logic [WIDTH-1:0] y);
 
   assign y = s ? d1 : d0; 
+endmodule
+
+module mux3 #(parameter WIDTH = 8)
+             (input  logic [WIDTH-1:0] d0, d1, d2, 
+              input  logic [1:0]       s, 
+              output logic [WIDTH-1:0] y);
+
+  always_comb
+    if (s == 2'b10) y = d2;
+    else if (s == 2'b01) y = d1;
+    else if (s == 2'b00) y = d0;
+    else y = 'bx;
 endmodule
 
 module alu(input  logic [31:0] a, b,
