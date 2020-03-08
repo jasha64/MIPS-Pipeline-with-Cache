@@ -31,28 +31,32 @@ module mips(input  logic        clk, reset,
             input  logic [31:0] readdata_m);
 
   logic [31:0] instr_d;
-  logic        memtoreg_w, alusrc_e, aluext_e, regdst_e, 
-               regwrite_m, regwrite_w, jump, pcsrc_d, zero;
+  logic        memtoreg_w, alusrc_e, aluext_e, regdst_e, memtoreg_e,
+               regwrite_m, regwrite_w, jump, pcsrc_d, zero, flush_e;
   logic [2:0]  alucontrol_e;
 
-  controller c(clk, reset, instr_d[31:26], instr_d[5:0], zero,
+  controller c(clk, reset, instr_d[31:26], instr_d[5:0], zero, flush_e,
                memtoreg_w, memwrite_m, pcsrc_d,
-               alusrc_e, aluext_e, regdst_e, regwrite_m, regwrite_w, jump,
+               alusrc_e, aluext_e, regdst_e,
+               memtoreg_e, regwrite_m, regwrite_w, jump,
                alucontrol_e);
   datapath dp(clk, reset, memtoreg_w, pcsrc_d,
-              alusrc_e, aluext_e, regdst_e, regwrite_m, regwrite_w, jump,
+              alusrc_e, aluext_e, regdst_e,
+              memtoreg_e, regwrite_m, regwrite_w, jump,
               alucontrol_e,
-              zero, pc_f, instr_f,
+              zero, flush_e,
+              pc_f, instr_f,
               aluout_m, writedata_m, result_w, instr_d,
               readdata_m);
 endmodule
 
 module controller(input  logic       clk, reset,
                   input  logic [5:0] op, funct,
-                  input  logic       zero,
+                  input  logic       zero, flush_e,
                   output logic       memtoreg_w, memwrite_m,
                   output logic       pcsrc_d, alusrc_e, aluext_e,
-                  output logic       regdst_e, regwrite_m, regwrite_w,
+                  output logic       regdst_e,
+                  output logic       memtoreg_e, regwrite_m, regwrite_w,
                   output logic       jump,
                   output logic [2:0] alucontrol_e);
                   
@@ -81,13 +85,13 @@ module controller(input  logic       clk, reset,
   mux2 #(1)  branchmux(zero, ~zero, branchctrl_d, branchcond); // Unsupported!!!
   assign pcsrc_d = branch_d & branchcond;
   
-  flopr #(1) decode2execute_1(clk, reset,   regwrite_d,   regwrite_e);
-  flopr #(1) decode2execute_2(clk, reset,   memtoreg_d,   memtoreg_e);
-  flopr #(1) decode2execute_3(clk, reset,   memwrite_d,   memwrite_e);
-  flopr #(3) decode2execute_4(clk, reset,   alucontrol_d, alucontrol_e);
-  flopr #(1) decode2execute_5(clk, reset,   alusrc_d,     alusrc_e);
-  flopr #(1) decode2execute_6(clk, reset,   aluext_d,     aluext_e);
-  flopr #(1) decode2execute_7(clk, reset,   regdst_d,     regdst_e);
+  floprc #(1) decode2execute_1(clk, reset, flush_e,   regwrite_d,   regwrite_e);
+  floprc #(1) decode2execute_2(clk, reset, flush_e,   memtoreg_d,   memtoreg_e);
+  floprc #(1) decode2execute_3(clk, reset, flush_e,   memwrite_d,   memwrite_e);
+  floprc #(3) decode2execute_4(clk, reset, flush_e,   alucontrol_d, alucontrol_e);
+  floprc #(1) decode2execute_5(clk, reset, flush_e,   alusrc_d,     alusrc_e);
+  floprc #(1) decode2execute_6(clk, reset, flush_e,   aluext_d,     aluext_e);
+  floprc #(1) decode2execute_7(clk, reset, flush_e,   regdst_d,     regdst_e);
   
   flopr #(1) execute2memory_1(clk, reset,   regwrite_e,   regwrite_m); 
   flopr #(1) execute2memory_2(clk, reset,   memtoreg_e,   memtoreg_m);
@@ -159,9 +163,9 @@ endmodule
 module datapath(input  logic        clk, reset,
                 input  logic        memtoreg_w, pcsrc_d,
                 input  logic        alusrc_e, aluext_e, regdst_e,
-                input  logic        regwrite_m, regwrite_w, jump,
+                input  logic        memtoreg_e, regwrite_m, regwrite_w, jump,
                 input  logic [2:0]  alucontrol_e,
-                output logic        zero,
+                output logic        zero, flush_e,
                 output logic [31:0] pc_f,
                 input  logic [31:0] instr_f,
                 output logic [31:0] aluout_m, writedata_m, result_w, instr_d,
@@ -170,10 +174,13 @@ module datapath(input  logic        clk, reset,
   logic [31:0] pcnextbr,  pcbranch_d; // Unsupported!!!
   logic [31:0] pcnext;
   logic [31:0] pc_f;
+  logic        stall_f;
   logic [31:0] instr_f,   instr_d;
   logic [31:0] pcplus4_f, pcplus4_d;
+  logic                   stall_d;
   logic [31:0]            rfread1_d,   rfread1_e;
   logic [31:0]            rfread2_d,   rfread2_e;
+  logic                                flush_e;
   logic [31:0]                         srca_e;
   logic [31:0]                         srcb_e;
   logic [4:0]             rs_d,        rs_e;
@@ -192,7 +199,7 @@ module datapath(input  logic        clk, reset,
   logic [31:0]                                      readdata_m,  readdata_w;
     
   // next PC logic
-  flopr #(32) pcreg(clk, reset, pcnext, pc_f);
+  flopenr #(32) pcreg(clk, reset, ~stall_f, pcnext, pc_f);
   adder       pcadd1_f(pc_f, 32'b100, pcplus4_f);
   sl2         immsh_d(signimm_d, signimmsh_d);
   adder       pcadd2_d(pcplus4_d, signimmsh_d, pcbranch_d);
@@ -219,20 +226,20 @@ module datapath(input  logic        clk, reset,
   alu         alu(srca_e, srcb_e, alucontrol_e, aluout_e, zero);
   
   // hazard unit
-  hazardunit  hz(regwrite_m, regwrite_w, rs_e, rt_e, writereg_m, writereg_w,
-                 forwarda_e, forwardb_e);
+  hazardunit  hz(memtoreg_e, regwrite_m, regwrite_w, rs_d, rt_d, rs_e, rt_e, writereg_m, writereg_w,
+                 forwarda_e, forwardb_e, stall_d, stall_f, flush_e);
   
   // pipeline registers
-  flopr #(32) fetch2decode_11(clk, reset,     instr_f,     instr_d);
-  flopr #(32) fetch2decode_12(clk, reset,     pcplus4_f,   pcplus4_d);
+  flopenr #(32) fetch2decode_11(clk, reset, ~stall_d, instr_f,     instr_d);
+  flopenr #(32) fetch2decode_12(clk, reset, ~stall_d, pcplus4_f,   pcplus4_d);
   
-  flopr #(32) decode2execute_11(clk, reset,   rfread1_d,   rfread1_e);
-  flopr #(32) decode2execute_12(clk, reset,   rfread2_d,   rfread2_e);
-  flopr #(5)  decode2execute_13(clk, reset,   rs_d,        rs_e);
-  flopr #(5)  decode2execute_14(clk, reset,   rt_d,        rt_e);
-  flopr #(5)  decode2execute_15(clk, reset,   rd_d,        rd_e);
-  flopr #(32) decode2execute_16(clk, reset,   signimm_d,   signimm_e);
-  flopr #(32) decode2execute_17(clk, reset,   zeroimm_d,   zeroimm_e);
+  floprc #(32) decode2execute_11(clk, reset, flush_e,   rfread1_d,   rfread1_e);
+  floprc #(32) decode2execute_12(clk, reset, flush_e,   rfread2_d,   rfread2_e);
+  floprc #(5)  decode2execute_13(clk, reset, flush_e,   rs_d,        rs_e);
+  floprc #(5)  decode2execute_14(clk, reset, flush_e,   rt_d,        rt_e);
+  floprc #(5)  decode2execute_15(clk, reset, flush_e,   rd_d,        rd_e);
+  floprc #(32) decode2execute_16(clk, reset, flush_e,   signimm_d,   signimm_e);
+  floprc #(32) decode2execute_17(clk, reset, flush_e,   zeroimm_d,   zeroimm_e);
   
   flopr #(32) execute2memory_11(clk, reset,   aluout_e,    aluout_m);
   flopr #(32) execute2memory_12(clk, reset,   writedata_e, writedata_m);
@@ -270,9 +277,11 @@ module regfile(input  logic        clk, reset,
   assign rd2 = (ra2 != 0) ? rf[ra2] : 0;
 endmodule
 
-module hazardunit(input  logic        regwrite_m, regwrite_w,
-                  input  logic [4:0]  rs_e, rt_e, writereg_m, writereg_w,
-                  output logic [1:0]  forwarda_e, forwardb_e);
+module hazardunit(input  logic       memtoreg_e, regwrite_m, regwrite_w,
+                  input  logic [4:0]  rs_d, rt_d, rs_e, rt_e, writereg_m, writereg_w,
+                  output logic [1:0]  forwarda_e, forwardb_e,
+                  output logic        stall_f, stall_d, flush_e);
+  // forwarding
   always_comb
     if (rs_e != '0 && rs_e == writereg_m && regwrite_m) forwarda_e = 2'b10;
     else if (rs_e != '0 && rs_e == writereg_w && regwrite_w) forwarda_e = 2'b01;
@@ -281,6 +290,13 @@ module hazardunit(input  logic        regwrite_m, regwrite_w,
     if (rt_e != '0 && rt_e == writereg_m && regwrite_m) forwardb_e = 2'b10;
     else if (rt_e != '0 && rt_e == writereg_w && regwrite_w) forwardb_e = 2'b01;
     else forwardb_e = 2'b00;
+  
+  // stalls
+  logic lwstall;
+  assign lwstall = ((rs_d == rt_e) | (rt_d == rt_e)) & memtoreg_e;
+  assign stall_f = lwstall;
+  assign stall_d = lwstall;
+  assign flush_e = lwstall;
 endmodule
 
 module adder(input  logic [31:0] a, b,
@@ -316,6 +332,27 @@ module flopr #(parameter WIDTH = 8)
   always_ff @(posedge clk, posedge reset)
     if (reset) q <= 0;
     else       q <= d;
+endmodule
+
+module flopenr #(parameter WIDTH = 8)
+              (input  logic             clk, reset, en,
+               input  logic [WIDTH-1:0] d, 
+               output logic [WIDTH-1:0] q);
+
+  always_ff @(posedge clk, posedge reset)
+    if (reset) q <= 0;
+    else if (en) q <= d;
+endmodule
+
+module floprc #(parameter WIDTH = 8)
+              (input  logic             clk, reset, clear,
+               input  logic [WIDTH-1:0] d, 
+               output logic [WIDTH-1:0] q);
+
+  always_ff @(posedge clk, posedge reset)
+    if (reset)      q <= 0;
+    else if (clear) q <= 0;
+    else            q <= d;
 endmodule
 
 module mux2 #(parameter WIDTH = 8)
