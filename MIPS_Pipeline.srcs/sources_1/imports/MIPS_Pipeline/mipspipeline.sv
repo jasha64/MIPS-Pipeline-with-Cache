@@ -31,15 +31,16 @@ module mips(input  logic        clk, reset,
             input  logic [31:0] readdata_m);
 
   logic [31:0] instr_d;
-  logic        branch_d, memtoreg_e, memtoreg_m, memtoreg_w, alusrcb_e, aluext_e, regdst_e,
+  logic        branch_d, memtoreg_e, memtoreg_m, memtoreg_w, alusrca_e, alusrcb_e, aluext_e, regdst_e,
                 regwrite_e, regwrite_m, regwrite_w, jump_d, jr_d, jal_w, pcsrc_d, flush_e, equal_d;
-  logic [2:0]  alucontrol_e;
+  logic [3:0]  alucontrol_e;
 
   controller c(clk, reset,
                instr_d[31:26], instr_d[5:0],
                flush_e, equal_d,
                memwrite_m, pcsrc_d, branch_d,
-               alusrcb_e, aluext_e, regdst_e,
+               alusrca_e, alusrcb_e,
+               aluext_e, regdst_e,
                memtoreg_e, memtoreg_m, memtoreg_w,
                regwrite_e, regwrite_m, regwrite_w,
                jump_d, jr_d,
@@ -47,7 +48,8 @@ module mips(input  logic        clk, reset,
                alucontrol_e);
   datapath dp(clk, reset,
               pcsrc_d, branch_d,
-              alusrcb_e, aluext_e, regdst_e,
+              alusrca_e, alusrcb_e,
+              aluext_e, regdst_e,
               memtoreg_e, memtoreg_m, memtoreg_w,
               regwrite_e, regwrite_m, regwrite_w,
               jump_d, jr_d,
@@ -65,12 +67,13 @@ module controller(input  logic       clk, reset,
                   input  logic [5:0] op, funct,
                   input  logic       flush_e, equal_d,
                   output logic       memwrite_m, pcsrc_d, branch_d,
-                  output logic       alusrcb_e, aluext_e, regdst_e,
+                  output logic       alusrca_e, alusrcb_e,
+                  output logic       aluext_e, regdst_e,
                   output logic       memtoreg_e, memtoreg_m, memtoreg_w,
                   output logic       regwrite_e, regwrite_m, regwrite_w,
                   output logic       jump_d, jr_d,
                   output logic       jal_w,
-                  output logic [2:0] alucontrol_e);
+                  output logic [3:0] alucontrol_e);
                   
   logic        jump_d;
   logic        jr_d;
@@ -82,7 +85,7 @@ module controller(input  logic       clk, reset,
   logic        regwrite_d,   regwrite_e,   regwrite_m, regwrite_w;
   logic        memtoreg_d,   memtoreg_e,   memtoreg_m, memtoreg_w;
   logic        memwrite_d,   memwrite_e,   memwrite_m;
-  logic [2:0]  alucontrol_d, alucontrol_e;
+  logic [3:0]  alucontrol_d, alucontrol_e;
   logic        alusrca_d,     alusrca_e;
   logic        alusrcb_d,     alusrcb_e;
   logic        aluext_d,     aluext_e;
@@ -99,7 +102,8 @@ module controller(input  logic       clk, reset,
   floprc #(1) decode2execute_1(clk, reset, flush_e,   regwrite_d,   regwrite_e);
   floprc #(1) decode2execute_2(clk, reset, flush_e,   memtoreg_d,   memtoreg_e);
   floprc #(1) decode2execute_3(clk, reset, flush_e,   memwrite_d,   memwrite_e);
-  floprc #(3) decode2execute_4(clk, reset, flush_e,   alucontrol_d, alucontrol_e);
+  floprc #(4) decode2execute_4(clk, reset, flush_e,   alucontrol_d, alucontrol_e);
+  floprc #(1) decode2execute_9(clk, reset, flush_e,   alusrca_d,     alusrca_e);
   floprc #(1) decode2execute_5(clk, reset, flush_e,   alusrcb_d,     alusrcb_e);
   floprc #(1) decode2execute_6(clk, reset, flush_e,   aluext_d,     aluext_e);
   floprc #(1) decode2execute_7(clk, reset, flush_e,   regdst_d,     regdst_e);
@@ -145,6 +149,9 @@ module maindec(input  logic [5:0] op, funct,
       6'b000000: case(funct) // RTYPE
           6'b001000: controls <= 12'b0_0_0_0_0_0_0_0_1_000; // JR
           6'b001001: controls <= 12'b1_0_0_0_0_0_0_0_1_000; // JAL
+          6'b000000: controls <= 12'b1_1_1_0_0_0_0_0_0_110; // SLL
+          6'b000010: controls <= 12'b1_1_1_0_0_0_0_0_0_110; // SRL
+          6'b000011: controls <= 12'b1_1_1_0_0_0_0_0_0_110; // SRA
           default:   controls <= 12'b1_1_0_0_0_0_0_0_0_110; // other RTYPE instrs
         endcase
       6'b100011: controls <= 12'b1_0_0_1_0_0_0_1_0_000; // LW
@@ -163,33 +170,40 @@ endmodule
 
 module aludec(input  logic [5:0] funct,
               input  logic [2:0] aluop,
-              output logic [2:0] alucontrol);
+              output logic [3:0] alucontrol);
   always_comb
     case(aluop)
-      3'b000: alucontrol <= 3'b010;  // add (for lw/sw/addi)
-      3'b001: alucontrol <= 3'b110;  // sub (for beq)
-      3'b010: alucontrol <= 3'b000;  // and (for andi)
-      3'b011: alucontrol <= 3'b001;  // or  (for ori)
-      3'b100: alucontrol <= 3'b111;  // slt (for slti)
+      3'b000: alucontrol <= 4'b0010;  // add (for lw/sw/addi)
+      3'b001: alucontrol <= 4'b0110;  // sub (for beq)
+      3'b010: alucontrol <= 4'b0000;  // and (for andi)
+      3'b011: alucontrol <= 4'b0001;  // or  (for ori)
+      3'b100: alucontrol <= 4'b0111;  // slt (for slti)
       default: case(funct)          // R-type instructions
-          6'b100000: alucontrol <= 3'b010; // add
-          6'b100010: alucontrol <= 3'b110; // sub
-          6'b100100: alucontrol <= 3'b000; // and
-          6'b100101: alucontrol <= 3'b001; // or
-          6'b101010: alucontrol <= 3'b111; // slt
-          default:   alucontrol <= 3'bxxx; // ???
+          6'b100000: alucontrol <= 4'b0010; // add
+          6'b100010: alucontrol <= 4'b0110; // sub
+          6'b100100: alucontrol <= 4'b0000; // and
+          6'b100101: alucontrol <= 4'b0001; // or
+          6'b101010: alucontrol <= 4'b0111; // slt
+          6'b000000: alucontrol <= 4'b1000; // sll
+          6'b000010: alucontrol <= 4'b1001; // srl
+          6'b000011: alucontrol <= 4'b1010; // sra
+          6'b000100: alucontrol <= 4'b1000; // sllv
+          6'b000110: alucontrol <= 4'b1001; // srlv
+          6'b000111: alucontrol <= 4'b1010; // srav
+          default:   alucontrol <= 4'bxxxx; // ???
         endcase
     endcase
 endmodule
 
 module datapath(input  logic        clk, reset,
                 input  logic        pcsrc_d, branch_d,
-                input  logic        alusrcb_e, aluext_e, regdst_e,
+                input  logic        alusrca_e, alusrcb_e,
+                input  logic        aluext_e, regdst_e,
                 input  logic        memtoreg_e, memtoreg_m, memtoreg_w,
                 input  logic        regwrite_e, regwrite_m, regwrite_w,
                 input  logic        jump_d, jr_d,
                 input  logic        jal_w,
-                input  logic [2:0]  alucontrol_e,
+                input  logic [3:0]  alucontrol_e,
                 output logic        flush_e, equal_d,
                 output logic [31:0] pc_f,
                 input  logic [31:0] instr_f,
@@ -203,7 +217,7 @@ module datapath(input  logic        clk, reset,
   logic [31:0] instr_f,   instr_d;
   logic [31:0] pcplus4_f, pcplus4_d,   pcplus4_e,   pcplus4_m,   pcplus4_w;
   logic [31:0]            jmpdst_d;
-  logic                   f2dclear_d;
+  logic                   flush_d;
   logic                   stall_d;
   logic                   forwarda_d;
   logic                   forwardb_d;
@@ -214,11 +228,13 @@ module datapath(input  logic        clk, reset,
   logic [31:0]            rfread1_d,   rfread1_e;
   logic [31:0]            rfread2_d,   rfread2_e;
   logic                                flush_e;
+  logic [31:0]                         srcans_e;  // srcA for non shift instrs
   logic [31:0]                         srca_e;
   logic [31:0]                         srcb_e;
   logic [4:0]             rs_d,        rs_e;
   logic [4:0]             rt_d,        rt_e;
   logic [4:0]             rd_d,        rd_e;
+  logic [4:0]             shamt_d,     shamt_e;
   logic [31:0]            zeroimm_d,   zeroimm_e;
   logic [31:0]            signimm_d,   signimm_e;
   logic [31:0]            signimmsh_d;
@@ -242,20 +258,18 @@ module datapath(input  logic        clk, reset,
   mux2 #(32)  jmpdstmux({pcplus4_d[31:28], instr_d[25:0], 2'b00},
                         rfread1_d, jr_d, jmpdst_d);
   mux2 #(32)  pcjmpmux(pcnextbr, jmpdst_d, jump_d, pcnext);
-  assign f2dclear_d = pcsrc_d | jump_d;
+  assign flush_d = pcsrc_d | jump_d;
 
   // register file logic
   assign rs_d = instr_d[25:21];
   assign rt_d = instr_d[20:16];
   assign rd_d = instr_d[15:11];
+  assign shamt_d = instr_d[10:6];
   regfile     rf(clk, reset, regwrite_w, rs_d, rt_d, 
-                 rfaddrin3_w, rfin3_w, rfout1_d, rfout2_d);  // rfread1_d, rfread2_d);
-  mux2 #(32)  brmux1_d(rfout1_d, aluout_m, forwarda_d, rfread1_d);  // fixed
+                 rfaddrin3_w, rfin3_w, rfout1_d, rfout2_d);
+  mux2 #(32)  brmux1_d(rfout1_d, aluout_m, forwarda_d, rfread1_d);
   mux2 #(32)  brmux2_d(rfout2_d, aluout_m, forwardb_d, rfread2_d);
   eqcmp       brpred_d(rfread1_d, rfread2_d, equal_d);
-  // mux2 #(32)  brmux1_d(rfread1_d, aluout_m, forwarda_d, brarg1_d);
-  // mux2 #(32)  brmux2_d(rfread2_d, aluout_m, forwardb_d, brarg2_d);
-  // eqcmp       brpred_d(brarg1_d, brarg2_d, equal_d);
   mux2 #(5)   wrmux_e(rt_e, rd_e, regdst_e, writereg_e);
   mux2 #(5)   wrmux_w(writereg_w, 5'd31, jal_w, rfaddrin3_w);
   mux2 #(32)  resmux2_w(result_w, pcplus4_w, jal_w, rfin3_w);
@@ -264,9 +278,10 @@ module datapath(input  logic        clk, reset,
   zeroext     ze_d(instr_d[15:0], zeroimm_d);
 
   // ALU logic
-  mux3 #(32)  fwamux_e(rfread1_e, result_w, aluout_m, forwarda_e, srca_e);
+  mux3 #(32)  fwamux_e(rfread1_e, result_w, aluout_m, forwarda_e, srcans_e);
   mux3 #(32)  fwbmux_e(rfread2_e, result_w, aluout_m, forwardb_e, writedata_e);
   mux2 #(32)  extmux_e(signimm_e, zeroimm_e, aluext_e, extimm_e);
+  mux2 #(32)  srcamux_e(srcans_e, {27'b0, shamt_e}, alusrca_e, srca_e);
   mux2 #(32)  srcbmux_e(writedata_e, extimm_e, alusrcb_e, srcb_e);
   alu         alu(srca_e, srcb_e, alucontrol_e, aluout_e, );
   
@@ -277,14 +292,15 @@ module datapath(input  logic        clk, reset,
                  stall_d, stall_f, flush_e, forwarda_d, forwardb_d);
   
   // pipeline registers
-  flopenrc #(32) fetch2decode_11(clk, reset, ~stall_d, f2dclear_d, instr_f,     instr_d);
-  flopenrc #(32) fetch2decode_12(clk, reset, ~stall_d, f2dclear_d, pcplus4_f,   pcplus4_d);
+  flopenrc #(32) fetch2decode_11(clk, reset, ~stall_d, flush_d, instr_f,     instr_d);
+  flopenrc #(32) fetch2decode_12(clk, reset, ~stall_d, flush_d, pcplus4_f,   pcplus4_d);
   
   floprc #(32) decode2execute_11(clk, reset, flush_e,   rfread1_d,   rfread1_e);
   floprc #(32) decode2execute_12(clk, reset, flush_e,   rfread2_d,   rfread2_e);
   floprc #(5)  decode2execute_13(clk, reset, flush_e,   rs_d,        rs_e);
   floprc #(5)  decode2execute_14(clk, reset, flush_e,   rt_d,        rt_e);
   floprc #(5)  decode2execute_15(clk, reset, flush_e,   rd_d,        rd_e);
+  floprc #(5)  decode2execute_19(clk, reset, flush_e,   shamt_d,     shamt_e);
   floprc #(32) decode2execute_16(clk, reset, flush_e,   signimm_d,   signimm_e);
   floprc #(32) decode2execute_17(clk, reset, flush_e,   zeroimm_d,   zeroimm_e);
   floprc #(32) decode2execute_18(clk, reset, flush_e,   pcplus4_d,   pcplus4_e);
@@ -320,8 +336,6 @@ module regfile(input  logic        clk, reset,
     if (reset)
       for (i = 0; i <= 31; i++) rf[i] <= 32'b0;
     else if (we3) rf[wa3] <= wd3;
-  //always_ff @(posedge clk)
-    //if (we3) rf[wa3] <= wd3;	
 
   assign rd1 = (ra1 != 0) ? rf[ra1] : 0;
   assign rd2 = (ra2 != 0) ? rf[ra2] : 0;
@@ -449,7 +463,7 @@ module eqcmp(input  logic [31:0] a, b,
 endmodule
 
 module alu(input  logic [31:0] a, b,
-           input  logic [2:0]  alucontrol,
+           input  logic [3:0]  alucontrol,
            output logic [31:0] result,
            output logic        zero);
 
@@ -459,12 +473,19 @@ module alu(input  logic [31:0] a, b,
   assign sum = a + condinvb + alucontrol[2];
 
   always_comb
-    case (alucontrol[1:0])
-      2'b00: result = a & b;
-      2'b01: result = a | b;
-      2'b10: result = sum;
-      2'b11: result = sum[31];
-    endcase
+    if (alucontrol[3] == 1'b0)
+      case (alucontrol[1:0])
+        2'b00: result = a & b;
+        2'b01: result = a | b;
+        2'b10: result = sum;
+        2'b11: result = sum[31];
+      endcase
+    else case (alucontrol[1:0])
+            2'b00: result = b << a[4:0];  // 1000: sll
+            2'b01: result = b >> a[4:0];  // 1001: srl
+            2'b10: result = b >>> a[4:0];  // 1010: sra
+            default: result = 'x;
+          endcase
 
   assign zero = (result == 32'b0);
 endmodule
