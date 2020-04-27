@@ -161,7 +161,7 @@ module maindec(input  logic [5:0] op, funct,
       6'b001000: controls <= 12'b1_0_0_1_0_0_0_0_0_000; // ADDI
       6'b001100: controls <= 12'b1_0_0_1_1_0_0_0_0_010; // ANDI
       6'b001101: controls <= 12'b1_0_0_1_1_0_0_0_0_011; // ORI
-      6'b001010: controls <= 12'b1_0_0_1_1_0_0_0_0_100; // SLTI
+      6'b001010: controls <= 12'b1_0_0_1_0_0_0_0_0_100; // SLTI
       6'b000010: controls <= 12'b0_0_0_0_0_0_0_0_1_000; // J
       6'b000011: controls <= 12'b1_0_0_0_0_0_0_0_1_000; // JAL
       default:   controls <= 12'bx_x_x_x_x_x_x_x_x_xxx; // illegal op
