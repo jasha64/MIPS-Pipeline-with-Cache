@@ -1,5 +1,5 @@
-`ifndef CACHE_VH
-`define CACHE_VH
+`ifndef CACHE_SVH
+`define CACHE_SVH
 
 `timescale 1ns / 1ps
 

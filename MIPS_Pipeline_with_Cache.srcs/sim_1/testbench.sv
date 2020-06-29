@@ -29,18 +29,5 @@ module testbench();
     end
 
   // check results manually
-  /*
-  always @(negedge clk)
-    begin
-      if(memwrite) begin
-        if(dataadr === 84 & writedata === 7) begin
-          $display("Simulation succeeded");
-          $stop;
-        end else if (dataadr !== 80) begin
-          $display("Simulation failed");
-          $stop;
-        end
-      end
-    end
-  */
+  
 endmodule

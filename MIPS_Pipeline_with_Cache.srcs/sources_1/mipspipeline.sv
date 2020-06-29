@@ -28,16 +28,20 @@ module mips(input  logic        clk, reset,
             input  logic [31:0] instr_f,
             output logic        memwrite_m,
             output logic [31:0] aluout_m, writedata_m, result_w,
-            input  logic [31:0] readdata_m);
+            input  logic [31:0] readdata_m,
+            input  logic        ihit, dhit,
+            output logic        dcen);
 
   logic [31:0] instr_d;
   logic        branch_d, memtoreg_e, memtoreg_m, memtoreg_w, alusrca_e, alusrcb_e, aluext_e, regdst_e,
-                regwrite_e, regwrite_m, regwrite_w, jump_d, jr_d, jal_w, pcsrc_d, flush_e, equal_d;
+               regwrite_e, regwrite_m, regwrite_w, jump_d, jr_d, jal_w, pcsrc_d, flush_e, equal_d,
+               stall_e, stall_m, stall_w;
   logic [3:0]  alucontrol_e;
 
   controller c(clk, reset,
                instr_d[31:26], instr_d[5:0],
                flush_e, equal_d,
+               stall_e, stall_m, stall_w,
                memwrite_m, pcsrc_d, branch_d,
                alusrca_e, alusrcb_e,
                aluext_e, regdst_e,
@@ -45,8 +49,10 @@ module mips(input  logic        clk, reset,
                regwrite_e, regwrite_m, regwrite_w,
                jump_d, jr_d,
                jal_w,
-               alucontrol_e);
+               alucontrol_e,
+               dcen);
   datapath dp(clk, reset,
+              ihit, dhit, dcen,
               pcsrc_d, branch_d,
               alusrca_e, alusrcb_e,
               aluext_e, regdst_e,
@@ -59,13 +65,15 @@ module mips(input  logic        clk, reset,
               pc_f,
               instr_f,
               aluout_m, writedata_m, result_w, instr_d,
-              readdata_m);
+              readdata_m,
+              stall_e, stall_m, stall_w);
               
 endmodule
 
 module controller(input  logic       clk, reset,
                   input  logic [5:0] op, funct,
                   input  logic       flush_e, equal_d,
+                  input  logic       stall_e, stall_m, stall_w,
                   output logic       memwrite_m, pcsrc_d, branch_d,
                   output logic       alusrca_e, alusrcb_e,
                   output logic       aluext_e, regdst_e,
@@ -73,7 +81,8 @@ module controller(input  logic       clk, reset,
                   output logic       regwrite_e, regwrite_m, regwrite_w,
                   output logic       jump_d, jr_d,
                   output logic       jal_w,
-                  output logic [3:0] alucontrol_e);
+                  output logic [3:0] alucontrol_e,
+                  output logic       dcen);
                   
   logic        jump_d;
   logic        jr_d;
@@ -98,25 +107,26 @@ module controller(input  logic       clk, reset,
              alusrca_d, alusrcb_d, aluext_d, regdst_d, regwrite_d, jump_d, jr_d, jal_d, aluop);
   aludec  ad(funct, aluop, alucontrol_d);
   assign pcsrc_d = branch_d & (equal_d ^ bne_d);
+  assign dcen = memwrite_m | memtoreg_m;
   
-  floprc #(1) decode2execute_1(clk, reset, flush_e,   regwrite_d,   regwrite_e);
-  floprc #(1) decode2execute_2(clk, reset, flush_e,   memtoreg_d,   memtoreg_e);
-  floprc #(1) decode2execute_3(clk, reset, flush_e,   memwrite_d,   memwrite_e);
-  floprc #(4) decode2execute_4(clk, reset, flush_e,   alucontrol_d, alucontrol_e);
-  floprc #(1) decode2execute_9(clk, reset, flush_e,   alusrca_d,     alusrca_e);
-  floprc #(1) decode2execute_5(clk, reset, flush_e,   alusrcb_d,     alusrcb_e);
-  floprc #(1) decode2execute_6(clk, reset, flush_e,   aluext_d,     aluext_e);
-  floprc #(1) decode2execute_7(clk, reset, flush_e,   regdst_d,     regdst_e);
-  floprc #(1) decode2execute_8(clk, reset, flush_e,   jal_d,        jal_e);
+  flopenrc #(1) decode2execute_1(clk, reset, ~stall_e, flush_e, regwrite_d,   regwrite_e);
+  flopenrc #(1) decode2execute_2(clk, reset, ~stall_e, flush_e, memtoreg_d,   memtoreg_e);
+  flopenrc #(1) decode2execute_3(clk, reset, ~stall_e, flush_e, memwrite_d,   memwrite_e);
+  flopenrc #(4) decode2execute_4(clk, reset, ~stall_e, flush_e, alucontrol_d, alucontrol_e);
+  flopenrc #(1) decode2execute_9(clk, reset, ~stall_e, flush_e, alusrca_d,    alusrca_e);
+  flopenrc #(1) decode2execute_5(clk, reset, ~stall_e, flush_e, alusrcb_d,    alusrcb_e);
+  flopenrc #(1) decode2execute_6(clk, reset, ~stall_e, flush_e, aluext_d,     aluext_e);
+  flopenrc #(1) decode2execute_7(clk, reset, ~stall_e, flush_e, regdst_d,     regdst_e);
+  flopenrc #(1) decode2execute_8(clk, reset, ~stall_e, flush_e, jal_d,        jal_e);
   
-  flopr #(1) execute2memory_1(clk, reset,   regwrite_e,   regwrite_m); 
-  flopr #(1) execute2memory_2(clk, reset,   memtoreg_e,   memtoreg_m);
-  flopr #(1) execute2memory_3(clk, reset,   memwrite_e,   memwrite_m);
-  flopr #(1) execute2memory_4(clk, reset,   jal_e,        jal_m);
+  flopenr #(1) execute2memory_1(clk, reset, ~stall_m, regwrite_e, regwrite_m); 
+  flopenr #(1) execute2memory_2(clk, reset, ~stall_m, memtoreg_e, memtoreg_m);
+  flopenr #(1) execute2memory_3(clk, reset, ~stall_m, memwrite_e, memwrite_m);
+  flopenr #(1) execute2memory_4(clk, reset, ~stall_m, jal_e,      jal_m);
   
-  flopr #(1) memory2writeback_1(clk, reset, regwrite_m,   regwrite_w);
-  flopr #(1) memory2writeback_2(clk, reset, memtoreg_m,   memtoreg_w);
-  flopr #(1) memory2writeback_3(clk, reset, jal_m,        jal_w);
+  flopenr #(1) memory2writeback_1(clk, reset, ~stall_w, regwrite_m, regwrite_w);
+  flopenr #(1) memory2writeback_2(clk, reset, ~stall_w, memtoreg_m, memtoreg_w);
+  flopenr #(1) memory2writeback_3(clk, reset, ~stall_w, jal_m,      jal_w);
 endmodule
 
 module maindec(input  logic [5:0] op, funct,
@@ -164,7 +174,7 @@ module maindec(input  logic [5:0] op, funct,
       6'b001010: controls <= 12'b1_0_0_1_0_0_0_0_0_100; // SLTI
       6'b000010: controls <= 12'b0_0_0_0_0_0_0_0_1_000; // J
       6'b000011: controls <= 12'b1_0_0_0_0_0_0_0_1_000; // JAL
-      default:   controls <= 12'bx_x_x_x_x_x_x_x_x_xxx; // illegal op
+      default:   controls <= 12'b0_x_x_x_x_0_0_0_0_xxx; // illegal op
     endcase
 endmodule
 
@@ -196,6 +206,7 @@ module aludec(input  logic [5:0] funct,
 endmodule
 
 module datapath(input  logic        clk, reset,
+                input  logic        ihit, dhit, dcen,
                 input  logic        pcsrc_d, branch_d,
                 input  logic        alusrca_e, alusrcb_e,
                 input  logic        aluext_e, regdst_e,
@@ -208,7 +219,8 @@ module datapath(input  logic        clk, reset,
                 output logic [31:0] pc_f,
                 input  logic [31:0] instr_f,
                 output logic [31:0] aluout_m, writedata_m, result_w, instr_d,
-                input  logic [31:0] readdata_m);
+                input  logic [31:0] readdata_m,
+                output logic        stall_e, stall_m, stall_w);
 
   logic [31:0] pcnextbr,  pcbranch_d;
   logic [31:0] pcnext;
@@ -228,6 +240,7 @@ module datapath(input  logic        clk, reset,
   logic [31:0]            rfread1_d,   rfread1_e;
   logic [31:0]            rfread2_d,   rfread2_e;
   logic                                flush_e;
+  logic                                stall_e;
   logic [31:0]                         srcans_e;  // srcA for non shift instrs
   logic [31:0]                         srca_e;
   logic [31:0]                         srcb_e;
@@ -245,9 +258,11 @@ module datapath(input  logic        clk, reset,
   logic [4:0]                                                    rfaddrin3_w;
   logic [31:0]                         aluout_e,    aluout_m,    aluout_w;
   logic [31:0]                         writedata_e, writedata_m;
+  logic                                             stall_m;
   logic [31:0]                                                   result_w;
   logic [31:0]                                                   rfin3_w;
   logic [31:0]                                      readdata_m,  readdata_w;
+  logic                                                          stall_w;
     
   // next PC logic
   flopenr #(32) pcreg(clk, reset, ~stall_f, pcnext, pc_f);
@@ -286,34 +301,35 @@ module datapath(input  logic        clk, reset,
   alu         alu(srca_e, srcb_e, alucontrol_e, aluout_e, );
   
   // hazard unit
-  hazardunit  hz(memtoreg_e, memtoreg_m, regwrite_e, regwrite_m, regwrite_w, branch_d, jr_d,
+  hazardunit  hz(ihit, dhit, dcen,
+                 memtoreg_e, memtoreg_m, regwrite_e, regwrite_m, regwrite_w, branch_d, jr_d,
                  rs_d, rt_d, rs_e, rt_e, writereg_e, writereg_m, writereg_w,
-                 forwarda_e, forwardb_e,
-                 stall_d, stall_f, flush_e, forwarda_d, forwardb_d);
+                 forwarda_e, forwardb_e, stall_f, stall_d, stall_e, stall_m, stall_w,
+                 flush_e, forwarda_d, forwardb_d);
   
   // pipeline registers
-  flopenrc #(32) fetch2decode_11(clk, reset, ~stall_d, flush_d, instr_f,     instr_d);
-  flopenrc #(32) fetch2decode_12(clk, reset, ~stall_d, flush_d, pcplus4_f,   pcplus4_d);
+  flopenrc #(32) fetch2decode_11  (clk, reset, ~stall_d, flush_d,   instr_f,     instr_d);
+  flopenrc #(32) fetch2decode_12  (clk, reset, ~stall_d, flush_d,   pcplus4_f,   pcplus4_d);
   
-  floprc #(32) decode2execute_11(clk, reset, flush_e,   rfread1_d,   rfread1_e);
-  floprc #(32) decode2execute_12(clk, reset, flush_e,   rfread2_d,   rfread2_e);
-  floprc #(5)  decode2execute_13(clk, reset, flush_e,   rs_d,        rs_e);
-  floprc #(5)  decode2execute_14(clk, reset, flush_e,   rt_d,        rt_e);
-  floprc #(5)  decode2execute_15(clk, reset, flush_e,   rd_d,        rd_e);
-  floprc #(5)  decode2execute_19(clk, reset, flush_e,   shamt_d,     shamt_e);
-  floprc #(32) decode2execute_16(clk, reset, flush_e,   signimm_d,   signimm_e);
-  floprc #(32) decode2execute_17(clk, reset, flush_e,   zeroimm_d,   zeroimm_e);
-  floprc #(32) decode2execute_18(clk, reset, flush_e,   pcplus4_d,   pcplus4_e);
+  flopenrc #(32) decode2execute_11(clk, reset, ~stall_e, flush_e,   rfread1_d,   rfread1_e);
+  flopenrc #(32) decode2execute_12(clk, reset, ~stall_e, flush_e,   rfread2_d,   rfread2_e);
+  flopenrc #(5)  decode2execute_13(clk, reset, ~stall_e, flush_e,   rs_d,        rs_e);
+  flopenrc #(5)  decode2execute_14(clk, reset, ~stall_e, flush_e,   rt_d,        rt_e);
+  flopenrc #(5)  decode2execute_15(clk, reset, ~stall_e, flush_e,   rd_d,        rd_e);
+  flopenrc #(5)  decode2execute_19(clk, reset, ~stall_e, flush_e,   shamt_d,     shamt_e);
+  flopenrc #(32) decode2execute_16(clk, reset, ~stall_e, flush_e,   signimm_d,   signimm_e);
+  flopenrc #(32) decode2execute_17(clk, reset, ~stall_e, flush_e,   zeroimm_d,   zeroimm_e);
+  flopenrc #(32) decode2execute_18(clk, reset, ~stall_e, flush_e,   pcplus4_d,   pcplus4_e);
   
-  flopr #(32) execute2memory_11(clk, reset,   aluout_e,    aluout_m);
-  flopr #(32) execute2memory_12(clk, reset,   writedata_e, writedata_m);
-  flopr #(5)  execute2memory_13(clk, reset,   writereg_e,  writereg_m);
-  flopr #(32) execute2memory_14(clk, reset,   pcplus4_e,   pcplus4_m);
+  flopenr #(32) execute2memory_11 (clk, reset, ~stall_m, aluout_e,    aluout_m);
+  flopenr #(32) execute2memory_12 (clk, reset, ~stall_m, writedata_e, writedata_m);
+  flopenr #(5)  execute2memory_13 (clk, reset, ~stall_m, writereg_e,  writereg_m);
+  flopenr #(32) execute2memory_14 (clk, reset, ~stall_m, pcplus4_e,   pcplus4_m);
   
-  flopr #(32) memory2writeback_11(clk, reset, readdata_m,  readdata_w);
-  flopr #(32) memory2writeback_12(clk, reset, aluout_m,    aluout_w);
-  flopr #(5)  memory2writeback_13(clk, reset, writereg_m,  writereg_w);
-  flopr #(32) memory2writeback_14(clk, reset, pcplus4_m,   pcplus4_w);
+  flopenr #(32) memory2writeback_11 (clk, reset, ~stall_w, readdata_m, readdata_w);
+  flopenr #(32) memory2writeback_12 (clk, reset, ~stall_w, aluout_m,   aluout_w);
+  flopenr #(5)  memory2writeback_13 (clk, reset, ~stall_w, writereg_m, writereg_w);
+  flopenr #(32) memory2writeback_14 (clk, reset, ~stall_w, pcplus4_m,  pcplus4_w);
 endmodule
 
 module regfile(input  logic        clk, reset,
@@ -341,11 +357,13 @@ module regfile(input  logic        clk, reset,
   assign rd2 = (ra2 != 0) ? rf[ra2] : 0;
 endmodule
 
-module hazardunit(input  logic        memtoreg_e, memtoreg_m, regwrite_e, regwrite_m, regwrite_w,
+module hazardunit(input  logic        ihit, dhit, dcen,
+                  input  logic        memtoreg_e, memtoreg_m, regwrite_e, regwrite_m, regwrite_w,
                   input  logic        branch_d, jr_d,
                   input  logic [4:0]  rs_d, rt_d, rs_e, rt_e, writereg_e, writereg_m, writereg_w,
                   output logic [1:0]  forwarda_e, forwardb_e,
-                  output logic        stall_f, stall_d, flush_e, forwarda_d, forwardb_d);
+                  output logic        stall_f, stall_d, stall_e, stall_m, stall_w,
+                  output logic        flush_e, forwarda_d, forwardb_d);
   // forwarding of data hazard
   always_comb
     if (rs_e != '0 && rs_e == writereg_m && regwrite_m) forwarda_e = 2'b10;
@@ -360,14 +378,19 @@ module hazardunit(input  logic        memtoreg_e, memtoreg_m, regwrite_e, regwri
   assign forwarda_d = (rs_d != 0) & (rs_d == writereg_m) & regwrite_m;
   assign forwardb_d = (rt_d != 0) & (rt_d == writereg_m) & regwrite_m;
   
-  // stalls of data hazard (LW) and control hazard
-  logic lwstall, branchstall;
+  // stalls of data hazard (LW), control hazard and cache misses
+  logic lwstall, branchstall, icachestall, dcachestall;
   assign lwstall = ((rs_d == rt_e) | (rt_d == rt_e)) & memtoreg_e;
   assign branchstall = ((branch_d | jr_d) & regwrite_e & (writereg_e == rs_d | writereg_e == rt_d))
                      | ((branch_d | jr_d) & memtoreg_m & (writereg_m == rs_d | writereg_m == rt_d));
-  assign stall_f = lwstall | branchstall;
+  assign icachestall = ~ihit;
+  assign dcachestall = dcen & ~dhit;
+  assign stall_f = lwstall | branchstall | icachestall | dcachestall;
   assign stall_d = stall_f;
   assign flush_e = stall_d;
+  assign stall_e = icachestall | dcachestall;
+  assign stall_m = stall_e;
+  assign stall_w = stall_m;
 endmodule
 
 module adder(input  logic [31:0] a, b,
